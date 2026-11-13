@@ -517,10 +517,13 @@ pub enum SwitchCase {
         null_span: Span,
         default_span: Span,
     },
-    /// `case String s`, `case String s when s.length() > 0`
+    /// `case String s`, `case String s, Integer i when s.length() > 0`
+    ///
+    /// Commas separate pattern alternatives (JEP 441); a guard applies to the
+    /// whole label, not to an individual alternative.
     CasePattern {
         case_span: Span,
-        pattern: Pattern,
+        patterns: Vec<Pattern>,
         guard: Box<Option<super::pat::Guard>>,
     },
     /// `default`
@@ -545,12 +548,15 @@ impl SwitchCase {
             } => case_span.join(*default_span),
             Self::CasePattern {
                 case_span,
-                pattern,
+                patterns,
                 guard,
             } => {
                 let end = match guard.as_ref() {
                     Some(g) => g.expr.span(),
-                    None => pattern.span(),
+                    None => patterns
+                        .last()
+                        .map(|pattern| pattern.span())
+                        .unwrap_or(*case_span),
                 };
                 case_span.join(end)
             }

@@ -2626,7 +2626,17 @@ fn parse_switch_labels(input: &ParseStream) -> Result<Vec<SwitchCase>> {
                 labels.push(SwitchCase::Default { default_span });
                 break;
             } else if let Some(pattern) = try_parse_case_pattern(input) {
-                // Java 21 pattern matching: case Type name -> or case Type(...) ->
+                // Java 21 pattern matching, with JEP 441 pattern alternatives:
+                // `case Type name ->`, `case Type(...) ->`,
+                // `case A a, B b when guard ->`.
+                let mut patterns = vec![pattern];
+                while input.eat(&TokenKind::Comma) {
+                    // Only patterns can follow a pattern; mixing constants and
+                    // patterns in one label is illegal, and `case null,` was
+                    // handled above.
+                    patterns.push(parse_pattern(input)?);
+                }
+                // The guard belongs to the whole label, not to one alternative.
                 let guard = if input.is(&TokenKind::When) {
                     let when_span = input.peek().span;
                     input.next();
@@ -2637,7 +2647,7 @@ fn parse_switch_labels(input: &ParseStream) -> Result<Vec<SwitchCase>> {
                 };
                 labels.push(SwitchCase::CasePattern {
                     case_span,
-                    pattern,
+                    patterns,
                     guard: Box::new(guard),
                 });
                 break;

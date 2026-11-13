@@ -47,20 +47,24 @@ fn first_switch_stmt(cu: &CompilationUnit) -> &SwitchStmt {
     }
 }
 
+/// The single pattern of the first label of the first switch-expression arm.
+/// Multi-pattern labels are covered by `switch_multi_pattern_tests.rs`.
 fn switch_expr_pattern(cu: &CompilationUnit) -> &Pattern {
-    let SwitchArm::Expr(SwitchCase::CasePattern { pattern, .. }, _, _) =
+    let SwitchArm::Expr(SwitchCase::CasePattern { patterns, .. }, _, _) =
         &first_switch_expr(cu).cases[0]
     else {
         panic!("expected a case pattern arm in the switch expression");
     };
-    pattern
+    assert_eq!(patterns.len(), 1, "expected a single pattern");
+    &patterns[0]
 }
 
 fn switch_stmt_pattern(cu: &CompilationUnit) -> &Pattern {
-    let SwitchCase::CasePattern { pattern, .. } = &first_switch_stmt(cu).cases[0].labels[0] else {
+    let SwitchCase::CasePattern { patterns, .. } = &first_switch_stmt(cu).cases[0].labels[0] else {
         panic!("expected a case pattern label in the switch statement");
     };
-    pattern
+    assert_eq!(patterns.len(), 1, "expected a single pattern");
+    &patterns[0]
 }
 
 fn switch_expr_type_pattern(cu: &CompilationUnit) -> &TypePattern {
@@ -386,12 +390,12 @@ fn test_constant_label_before_pattern_label() {
     };
     assert_eq!(values[0].span().source_text(src), "SomeEnum.A");
 
-    let SwitchArm::Expr(SwitchCase::CasePattern { pattern, .. }, _, _) = &switch_expr.cases[1]
+    let SwitchArm::Expr(SwitchCase::CasePattern { patterns, .. }, _, _) = &switch_expr.cases[1]
     else {
         panic!("expected a case pattern arm for the qualified type pattern");
     };
-    let Pattern::TypePattern(pattern) = pattern else {
-        panic!("expected a type pattern, got {pattern:?}");
+    let Pattern::TypePattern(pattern) = &patterns[0] else {
+        panic!("expected a type pattern, got {:?}", patterns[0]);
     };
     assert_eq!(pattern.ty.span().source_text(src), "Outer.Inner");
 }
@@ -458,13 +462,18 @@ fn test_qualified_type_pattern_with_guard() {
     let src = "class Foo { void m(Object o) { var x = switch (o) { \
                case java.time.Duration d when d.isZero() -> 1; default -> 0; }; } }";
     let cu = parse_method(src);
-    let SwitchArm::Expr(SwitchCase::CasePattern { pattern, guard, .. }, _, _) =
-        &first_switch_expr(&cu).cases[0]
+    let SwitchArm::Expr(
+        SwitchCase::CasePattern {
+            patterns, guard, ..
+        },
+        _,
+        _,
+    ) = &first_switch_expr(&cu).cases[0]
     else {
         panic!("expected a case pattern arm");
     };
-    let Pattern::TypePattern(pattern) = pattern else {
-        panic!("expected a type pattern, got {pattern:?}");
+    let Pattern::TypePattern(pattern) = &patterns[0] else {
+        panic!("expected a type pattern, got {:?}", patterns[0]);
     };
     assert_eq!(pattern.ty.span().source_text(src), "java.time.Duration");
     let guard = guard.as_ref().as_ref().expect("expected a guard");

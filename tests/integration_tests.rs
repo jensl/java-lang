@@ -1513,11 +1513,12 @@ fn first_switch_arm_pattern(cu: &CompilationUnit) -> &Pattern {
     let Some(Expr::Switch(switch_expr)) = &decl.declarators[0].initializer else {
         panic!("expected a switch expression initializer");
     };
-    let SwitchArm::Expr(SwitchCase::CasePattern { pattern, .. }, _, _) = &switch_expr.cases[0]
+    let SwitchArm::Expr(SwitchCase::CasePattern { patterns, .. }, _, _) = &switch_expr.cases[0]
     else {
         panic!("expected a case pattern arm");
     };
-    pattern
+    assert_eq!(patterns.len(), 1, "expected a single pattern");
+    &patterns[0]
 }
 
 #[test]
@@ -1747,11 +1748,11 @@ fn test_unnamed_pattern_in_switch_statement_labels() {
     let Stmt::Switch(switch_stmt) = &method_body(&cu).stmts[0] else {
         panic!("expected a switch statement");
     };
-    let SwitchCase::CasePattern { pattern, .. } = &switch_stmt.cases[0].labels[0] else {
+    let SwitchCase::CasePattern { patterns, .. } = &switch_stmt.cases[0].labels[0] else {
         panic!("expected a case pattern label");
     };
-    let Pattern::TypePattern(pat) = pattern else {
-        panic!("expected a type pattern");
+    let [Pattern::TypePattern(pat)] = patterns.as_slice() else {
+        panic!("expected a single type pattern");
     };
     assert!(pat.name.is_none());
 }
@@ -1765,10 +1766,10 @@ fn test_bare_unnamed_pattern_in_switch_statement_labels() {
     let Stmt::Switch(switch_stmt) = &method_body(&cu).stmts[0] else {
         panic!("expected a switch statement");
     };
-    let SwitchCase::CasePattern { pattern, .. } = &switch_stmt.cases[0].labels[0] else {
+    let SwitchCase::CasePattern { patterns, .. } = &switch_stmt.cases[0].labels[0] else {
         panic!("expected a case pattern label");
     };
-    assert!(matches!(pattern, Pattern::Unnamed(_)));
+    assert!(matches!(patterns.as_slice(), [Pattern::Unnamed(_)]));
 }
 
 #[test]
@@ -1781,13 +1782,18 @@ fn test_unnamed_switch_pattern_with_guard() {
     let Some(Expr::Switch(switch_expr)) = &decl.declarators[0].initializer else {
         panic!("expected a switch expression initializer");
     };
-    let SwitchArm::Expr(SwitchCase::CasePattern { pattern, guard, .. }, _, _) =
-        &switch_expr.cases[0]
+    let SwitchArm::Expr(
+        SwitchCase::CasePattern {
+            patterns, guard, ..
+        },
+        _,
+        _,
+    ) = &switch_expr.cases[0]
     else {
         panic!("expected a case pattern arm");
     };
-    let Pattern::TypePattern(pat) = pattern else {
-        panic!("expected a type pattern");
+    let [Pattern::TypePattern(pat)] = patterns.as_slice() else {
+        panic!("expected a single type pattern");
     };
     assert!(pat.name.is_none());
     assert!(guard.is_some());
