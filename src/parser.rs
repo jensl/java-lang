@@ -2625,9 +2625,8 @@ fn parse_switch_labels(input: &ParseStream) -> Result<Vec<SwitchCase>> {
                 input.next();
                 labels.push(SwitchCase::Default { default_span });
                 break;
-            } else if is_case_pattern(input) {
+            } else if let Some(pattern) = try_parse_case_pattern(input) {
                 // Java 21 pattern matching: case Type name -> or case Type(...) ->
-                let pattern = parse_pattern(input)?;
                 let guard = if input.is(&TokenKind::When) {
                     let when_span = input.peek().span;
                     input.next();
@@ -2676,27 +2675,27 @@ fn parse_switch_labels(input: &ParseStream) -> Result<Vec<SwitchCase>> {
     Ok(labels)
 }
 
-/// Check if the current position in a switch case is a pattern (Java 21+).
-/// Patterns are: `Type name` (type pattern) or `Type(...)` (record pattern).
-/// Returns false for simple constant values like `case FOO`.
-fn is_case_pattern(input: &ParseStream) -> bool {
-    // Bare unnamed pattern: `case _`
-    if input.is(&TokenKind::Underscore) {
-        return true;
-    }
-    // Must start with an identifier (the type)
-    if !input.is_any_ident() {
-        return false;
-    }
-    let next = input.look_ahead(1);
-    match &next.kind {
-        // Type pattern: `case Triangle t` or `case Triangle _`
-        TokenKind::Ident(_) | TokenKind::Underscore => true,
-        // Record pattern: `case Pair(...)`
-        TokenKind::LParen => true,
-        // Not a pattern: `case CONSTANT` or `case CONSTANT ->`
-        _ => false,
-    }
+/// Speculatively parse a switch-label pattern (Java 21+).
+///
+/// Pattern labels (`case java.time.Duration d`, `case Map<?, ?> m`,
+/// `case Outer.Inner(int x)`) and constant labels (`case FOO`,
+/// `case SomeEnum.A`) share a prefix, so no fixed-token lookahead can tell them
+/// apart: both can start with a possibly qualified name. Instead, parse a
+/// pattern and keep it only when it cannot be a constant expression, i.e. when
+/// it is a record pattern, a bare unnamed pattern, or a type pattern that
+/// actually binds a name. Bare type patterns (`case String`) are not legal
+/// labels, so a failed speculation safely falls back to `parse_case_value`.
+fn try_parse_case_pattern(input: &ParseStream) -> Option<Pattern> {
+    input.try_parse(|i| {
+        let (pattern, binds_name) = parse_pattern_inner(i)?;
+        if !binds_name {
+            return Err(crate::error::Error::new(
+                i.peek().span,
+                "not a pattern label",
+            ));
+        }
+        Ok(pattern)
+    })
 }
 
 fn parse_while_stmt(input: &ParseStream, leading_comments: Vec<Comment>) -> Result<Stmt> {
@@ -4332,11 +4331,30 @@ fn parse_switch_arm(input: &ParseStream) -> Result<SwitchArm> {
 // ============================================================================
 
 fn parse_pattern(input: &ParseStream) -> Result<Pattern> {
+    parse_pattern_inner(input).map(|(pattern, _)| pattern)
+}
+
+/// Parse a pattern and report whether it binds a name (`_` counts). A type
+/// pattern that binds nothing is just a bare type, which is legal as an
+/// `instanceof` target but not as a switch label; callers that need to tell a
+/// pattern label from a constant label use the flag.
+fn parse_pattern_inner(input: &ParseStream) -> Result<(Pattern, bool)> {
     if let Some(span) = input.eat_span(&TokenKind::Underscore) {
-        return Ok(Pattern::Unnamed(span));
+        return Ok((Pattern::Unnamed(span), true));
     }
 
-    let annotations = parse_annotations(input)?;
+    // `VariableModifier`s may precede a pattern type in either order, e.g.
+    // `final @Deprecated String s`. `final` has no AST representation (matching
+    // how `instanceof` patterns handle it); annotations are kept.
+    let mut annotations = Vec::new();
+    loop {
+        input.eat(&TokenKind::Final);
+        let parsed = parse_annotations(input)?;
+        if parsed.is_empty() {
+            break;
+        }
+        annotations.extend(parsed);
+    }
 
     // Try record pattern: Type(Component1, Component2)
     // or type pattern: Type name
@@ -4353,22 +4371,28 @@ fn parse_pattern(input: &ParseStream) -> Result<Pattern> {
         input.expect(TokenKind::RParen)?;
         let start = annotations.first().map(|a| a.span()).unwrap_or(ty.span());
         let end = input.peek().span;
-        Ok(Pattern::RecordPattern(RecordPattern {
-            record_type: ty,
-            components,
-            span: start.join(end),
-        }))
+        Ok((
+            Pattern::RecordPattern(RecordPattern {
+                record_type: ty,
+                components,
+                span: start.join(end),
+            }),
+            true,
+        ))
     } else {
         // Type pattern
         let (name, name_span) =
             parse_declarator_name(input).map_or((None, None), |(name, span)| (name, Some(span)));
         let start = annotations.first().map(|a| a.span()).unwrap_or(ty.span());
         let end = name_span.unwrap_or_else(|| ty.span());
-        Ok(Pattern::TypePattern(TypePattern {
-            annotations,
-            ty,
-            name,
-            span: start.join(end),
-        }))
+        Ok((
+            Pattern::TypePattern(TypePattern {
+                annotations,
+                ty,
+                name,
+                span: start.join(end),
+            }),
+            name_span.is_some(),
+        ))
     }
 }
