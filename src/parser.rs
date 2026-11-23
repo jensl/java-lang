@@ -3055,8 +3055,12 @@ fn parse_try_stmt(input: &ParseStream, leading_comments: Vec<Comment>) -> Result
                 }
             }
             input.restore_state(&saved);
-            let ident = input.parse_ident()?;
-            resources.push(TryResource::VarRef(ident));
+            // Not a declaration, so a variable access: a name or a field access
+            // (`br`, `h.stream`, `this.h`). javac parses any expression here and
+            // rejects non-variable ones during attribution, so a full expression
+            // is the right syntactic fit.
+            let expr = parse_expression(input)?;
+            resources.push(TryResource::VarAccess(expr));
             if !input.eat(&TokenKind::Semicolon) {
                 break;
             }

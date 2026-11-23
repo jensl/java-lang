@@ -501,8 +501,11 @@ pub struct CatchType {
 pub enum TryResource {
     /// A variable declaration: `BufferedReader br = new BufferedReader(...)`
     Decl(LocalVarDeclStmt),
-    /// A final variable reference: `br` (Java 9+)
-    VarRef(Ident),
+    /// A variable access (Java 9+): `br`, `h.stream`, `this.h`
+    ///
+    /// JLS §14.20.3 allows a name or a field access here, so this holds either
+    /// an [`Expr::Ident`] or an [`Expr::FieldAccess`].
+    VarAccess(Expr),
 }
 
 /// A yield statement (in switch expressions).
